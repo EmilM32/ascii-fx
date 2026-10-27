@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseColor } from '../src/color';
+import { sanitizeOptions } from '../src/attributes';
 import { CHARSET_PRESETS, resolveCharset } from '../src/charset';
 import { adjustLuma, adjustRgb, luminance } from '../src/luminance';
 import { quantizeLuma } from '../src/dither';
@@ -125,6 +126,16 @@ describe('charset presets', () => {
     const custom = resolveCharset(' .#');
     expect(custom.kind).toBe('glyphs');
     expect(custom.chars).toEqual([' ', '.', '#']);
+  });
+
+  it('keeps the leading space of a custom ramp through the options', () => {
+    const charset = sanitizeOptions({ charset: ' xo' }).charset;
+    expect(resolveCharset(charset).chars).toEqual([' ', 'x', 'o']);
+    expect(sanitizeOptions({ charset: '   ' }).charset).toBe('classic');
+  });
+
+  it('treats a ramp named like an object property as glyphs', () => {
+    expect(resolveCharset('constructor').chars).toEqual(Array.from('constructor'));
   });
 
   it('includes a literal backslash in the standard ramp', () => {

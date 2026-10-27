@@ -36,7 +36,7 @@ export function resolveCharset(input: string | undefined): ResolvedCharset {
   if (!input || !input.trim()) return glyphPreset('classic');
   const name = input.trim();
   if (name === 'braille') return { kind: 'braille', chars: brailleCharacters(), label: 'braille' };
-  if (name in CHARSET_PRESETS) return glyphPreset(name as Exclude<CharsetPreset, 'braille'>);
+  if (Object.prototype.hasOwnProperty.call(CHARSET_PRESETS, name)) return glyphPreset(name as Exclude<CharsetPreset, 'braille'>);
   const chars = splitChars(input);
   if (chars.length === 0) return glyphPreset('classic');
   return { kind: 'glyphs', chars, label: input };
