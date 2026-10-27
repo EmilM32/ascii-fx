@@ -1,0 +1,69 @@
+{
+  "name": "ascii-fx",
+  "version": "0.1.0",
+  "description": "Live ASCII, dither, and halftone rendering for images, video, and webcam.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Emil Majer (https://github.com/EmilM32)",
+  "homepage": "https://github.com/EmilM32/ascii-fx#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EmilM32/ascii-fx.git"
+  },
+  "bugs": {
+    "url": "https://github.com/EmilM32/ascii-fx/issues"
+  },
+  "keywords": [
+    "ascii",
+    "ascii-art",
+    "dither",
+    "halftone",
+    "canvas",
+    "webcam",
+    "web-component",
+    "animation"
+  ],
+  "sideEffects": [
+    "./dist/element.js"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./element": {
+      "types": "./dist/element.d.ts",
+      "import": "./dist/element.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "vite --config vite.demo.config.ts",
+    "build": "vite build && tsc -p tsconfig.build.json && vite build --config vite.demo.config.ts",
+    "build:lib": "vite build && tsc -p tsconfig.build.json",
+    "build:demo": "vite build --config vite.demo.config.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "prepublishOnly": "npm run build:lib"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.9.1",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2",
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
