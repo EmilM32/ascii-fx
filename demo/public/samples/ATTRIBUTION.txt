@@ -1,0 +1,11 @@
+aldrin.jpg and hero.mp4
+  Buzz Aldrin on the Moon during Apollo 11, 20 July 1969.
+  Photograph by Neil Armstrong. NASA / public domain.
+  https://commons.wikimedia.org/wiki/File:Aldrin_Apollo_11_original.jpg
+  hero.mp4 is a six-second loop made from that photograph (a slow crop drift).
+
+earth.jpg
+  The Blue Marble, Apollo 17, 7 December 1972. NASA / public domain.
+  https://commons.wikimedia.org/wiki/File:The_Earth_seen_from_Apollo_17.jpg
+
+Playground files you drop or capture stay in the browser. They are not uploaded.
