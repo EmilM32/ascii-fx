@@ -695,11 +695,16 @@ class Renderer {
     }
     const ctx = this.sampleCtx;
     ctx.clearRect(0, 0, target.w, target.h);
-    const rect = fitRect(size.w, size.h, target.w, target.h, this.options.fit);
+    // Fit in display space, then scale into the sampler. Grid samples are not square:
+    // one per cell (or per braille dot), so fitting in sample space would stretch the picture.
+    const frame = mode === 'photo' ? target : { w: this.cols * this.cellW, h: this.rows * this.cellH };
+    const rect = fitRect(size.w, size.h, frame.w, frame.h, this.options.fit);
     if (rect.sw <= 0 || rect.sh <= 0) return false;
+    const kx = target.w / frame.w;
+    const ky = target.h / frame.h;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(src, rect.sx, rect.sy, rect.sw, rect.sh, rect.dx, rect.dy, rect.dw, rect.dh);
+    ctx.drawImage(src, rect.sx, rect.sy, rect.sw, rect.sh, rect.dx * kx, rect.dy * ky, rect.dw * kx, rect.dh * ky);
     try {
       // Photo mode uploads the canvas to WebGL, which rejects tainted pixels the same way.
       if (mode === 'grid') this.sampleRGBA = ctx.getImageData(0, 0, target.w, target.h).data;
