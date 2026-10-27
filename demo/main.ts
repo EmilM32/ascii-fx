@@ -166,6 +166,7 @@ document.querySelector('#charset')?.addEventListener('change', (event) => {
 });
 document.querySelector('#custom')?.addEventListener('input', (event) => {
   state.custom = (event.target as HTMLInputElement).value || ' ';
+  state.charset = 'custom';
   sync();
 });
 document.querySelector('#cell')?.addEventListener('input', (event) => {

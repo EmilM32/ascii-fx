@@ -99,7 +99,8 @@ export function sanitizeOptions(input: Partial<AsciiFxOptions>, base: ResolvedAs
   if (input.reducedMotion === 'auto' || input.reducedMotion === 'allow' || input.reducedMotion === 'reduce') {
     reducedMotion = input.reducedMotion;
   }
-  const charset = input.charset === undefined ? base.charset : input.charset.trim() || base.charset;
+  // Keep surrounding spaces: a leading space is the darkest step of most ramps.
+  const charset = input.charset === undefined || !input.charset.trim() ? base.charset : input.charset;
   return {
     source: input.source === undefined ? base.source : input.source,
     charset,
