@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { attributesToOptions, parseDitherMode } from '../src/attributes';
+import { attributesToOptions, parseDitherMode, removedAttributeOptions } from '../src/attributes';
 import { BAYER_4, bayerThreshold, floydSteinberg, halftoneDot, quantizeLuma, resolveDither } from '../src/dither';
 import { fitRect } from '../src/fit';
-import { buildCells, indicesToText } from '../src/raster';
+import { brailleFloydMasks, buildCells, glyphLumaField, indicesToText } from '../src/raster';
 
 describe('ordered dither', () => {
   it('matches the Bayer matrix corners', () => {
@@ -142,5 +142,71 @@ describe('attributes', () => {
       fontFamily: 'monospace',
     });
     expect(parseDitherMode('ordered')).toBe('bayer');
+  });
+
+  it('resets an option to its default when the attribute is removed', () => {
+    expect(removedAttributeOptions('invert')).toEqual({ invert: false });
+    expect(removedAttributeOptions('dither')).toEqual({ dither: 'none' });
+    expect(removedAttributeOptions('cell-size')).toEqual({ cellSize: 8 });
+    expect(removedAttributeOptions('font')).toHaveProperty('fontFamily');
+    expect(removedAttributeOptions('src')).toEqual({ source: undefined });
+    expect('source' in removedAttributeOptions('src')).toBe(true);
+    expect(removedAttributeOptions('webcam')).toEqual({});
+  });
+});
+
+describe('letterbox', () => {
+  const transparent = new Uint8ClampedArray(2 * 4 * 4);
+  const common = {
+    sampleWidth: 2,
+    sampleHeight: 4,
+    cols: 1,
+    rows: 1,
+    contrast: 1,
+    brightness: 0,
+    invert: true,
+    colorMode: 'mono' as const,
+    fg: { r: 1, g: 1, b: 1 },
+    bg: { r: 0, g: 0, b: 0 },
+    interaction: 'none' as const,
+    pointerX: 0,
+    pointerY: 0,
+    cellCssW: 8,
+    cellCssH: 16,
+    radius: 20,
+    strength: 1,
+    influence: 0,
+    floydBase: null,
+  };
+
+  it('leaves transparent glyph cells blank even when inverted', () => {
+    const chars = ['0', '1'];
+    const field = buildCells({ ...common, rgba: transparent, kind: 'glyphs', levels: chars.length, dither: 'bayer' });
+    expect(field.blank[0]).toBe(1);
+    expect(field.instances[2]).toBe(-1);
+    expect(indicesToText(field.indices, 1, 1, chars, field.blank)).toBe(' ');
+  });
+
+  it('leaves transparent braille cells blank under brighten and swap', () => {
+    for (const interaction of ['brighten', 'swap'] as const) {
+      const field = buildCells({
+        ...common,
+        rgba: transparent,
+        kind: 'braille',
+        levels: 256,
+        dither: 'none',
+        interaction,
+        influence: 1,
+        pointerX: 4,
+        pointerY: 8,
+      });
+      expect(field.blank[0]).toBe(1);
+      expect(field.instances[2]).toBe(-1);
+    }
+  });
+
+  it('keeps transparent samples dark for Floyd–Steinberg', () => {
+    expect(Array.from(glyphLumaField({ ...common, rgba: transparent }))).toEqual([0]);
+    expect(Array.from(brailleFloydMasks({ ...common, rgba: transparent }))).toEqual([0]);
   });
 });

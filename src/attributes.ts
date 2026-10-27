@@ -22,6 +22,34 @@ export const ATTRIBUTE_NAMES = [
   'paused',
 ] as const;
 
+/** Option each attribute sets. `src` and `webcam` are handled by the element itself. */
+const ATTRIBUTE_OPTIONS = {
+  charset: 'charset',
+  'cell-size': 'cellSize',
+  color: 'color',
+  foreground: 'foreground',
+  background: 'background',
+  dither: 'dither',
+  contrast: 'contrast',
+  brightness: 'brightness',
+  invert: 'invert',
+  interaction: 'interaction',
+  radius: 'radius',
+  strength: 'strength',
+  fps: 'fps',
+  fit: 'fit',
+  font: 'fontFamily',
+  paused: 'paused',
+} as const satisfies Partial<Record<(typeof ATTRIBUTE_NAMES)[number], keyof ResolvedAsciiFxOptions>>;
+
+/** Options that undo a removed attribute: its default, or no source for `src`. */
+export function removedAttributeOptions(name: string): Partial<AsciiFxOptions> {
+  if (name === 'src') return { source: undefined };
+  if (!(name in ATTRIBUTE_OPTIONS)) return {};
+  const key = ATTRIBUTE_OPTIONS[name as keyof typeof ATTRIBUTE_OPTIONS];
+  return { [key]: ASCII_FX_DEFAULTS[key] };
+}
+
 export function parseColorMode(value: string | null | undefined): ColorMode | undefined {
   if (!value) return undefined;
   const v = value.trim().toLowerCase();
