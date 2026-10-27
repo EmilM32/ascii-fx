@@ -9,6 +9,7 @@ import {
   brailleFloydMasks,
   buildCells,
   glyphFloydIndices,
+  type CellField,
   glyphLumaField,
   indicesToText,
 } from './raster';
@@ -16,6 +17,9 @@ import { GLYPH_FS, GLYPH_VS, HALFTONE_FS, HALFTONE_VS } from './shaders';
 import type { AsciiFx, AsciiFxOptions, AsciiFxSnapshot, AsciiFxSource, DitherMode, InteractionMode, ResolvedAsciiFxOptions } from './types';
 
 const VIDEO_URL = /\.(mp4|webm|ogg|mov)(?:[?#].*)?$/i;
+
+/** Backing-store budget in device pixels. Above it the resolution drops below device pixel ratio. */
+const MAX_CANVAS_PIXELS = 2560 * 1600;
 
 class Spring2 {
   x = 0;
@@ -216,11 +220,18 @@ class Renderer {
   private rows = 0;
   private cellW = 8;
   private cellH = 12;
+  /** Top-left of the cell grid in device pixels. Centers the remainder of a partial cell. */
+  private originX = 0;
+  private originY = 0;
+  /** Content box of the observed element in CSS pixels, fractional, from ResizeObserver. */
+  private boxW = 0;
+  private boxH = 0;
   private layoutKey = '';
   private needsCapture = true;
   private floydDirty = true;
   private floydBase: Uint8Array | null = null;
   private lastIndices: Uint8Array | null = null;
+  private lastBlank: Uint8Array | null = null;
   private raf = 0;
   private playing = true;
   private visible = true;
@@ -262,7 +273,8 @@ class Renderer {
       this.canvas.setAttribute('aria-label', 'ASCII rendering');
     }
     this.sample = document.createElement('canvas');
-    const sampleCtx = this.sample.getContext('2d', { alpha: false, willReadFrequently: true });
+    // Alpha stays on so letterbox and transparent source pixels read as empty.
+    const sampleCtx = this.sample.getContext('2d', { willReadFrequently: true });
     if (!sampleCtx) throw new Error('Could not create a sampling canvas');
     this.sampleCtx = sampleCtx;
     this.initContext();
@@ -278,7 +290,7 @@ class Renderer {
     if (!this.alive) return;
     const prev = this.options;
     this.options = sanitizeOptions({ ...prev, ...partial });
-    if (partial.source !== undefined && partial.source !== prev.source) void this.load(this.options.source);
+    if ('source' in partial && partial.source !== prev.source) void this.load(this.options.source);
     if (this.options.cellSize !== prev.cellSize || this.options.fontFamily !== prev.fontFamily) this.layoutKey = '';
     if (
       this.options.charset !== prev.charset ||
@@ -343,7 +355,9 @@ class Renderer {
 
   toText(): string {
     if (!this.lastIndices || this.displayDither() === 'halftone') this.drawText();
-    const text = this.lastIndices ? indicesToText(this.lastIndices, this.cols, this.rows, this.charset.chars) : '';
+    const text = this.lastIndices
+      ? indicesToText(this.lastIndices, this.cols, this.rows, this.charset.chars, this.lastBlank)
+      : '';
     this.needsCapture = true;
     this.poke();
     return text;
@@ -404,7 +418,12 @@ class Renderer {
   }
 
   private bind() {
-    this.resizeObserver = new ResizeObserver(() => {
+    this.resizeObserver = new ResizeObserver((entries) => {
+      const box = entries[entries.length - 1]?.contentRect;
+      if (box) {
+        this.boxW = box.width;
+        this.boxH = box.height;
+      }
       this.layoutKey = '';
       this.poke();
     });
@@ -541,6 +560,7 @@ class Renderer {
     this.frameSource = null;
     this.sampleRGBA = null;
     this.lastIndices = null;
+    this.lastBlank = null;
     this.readyFired = false;
     this.needsCapture = true;
     if (source == null || source === '') {
@@ -609,42 +629,50 @@ class Renderer {
     return this.aspect;
   }
 
+  private cssSize(): { w: number; h: number } {
+    return {
+      w: this.boxW || this.observeTarget.clientWidth,
+      h: this.boxH || this.observeTarget.clientHeight,
+    };
+  }
+
   private layout() {
-    const cssW = this.observeTarget.clientWidth;
-    const cssH = this.observeTarget.clientHeight;
+    const { w: cssW, h: cssH } = this.cssSize();
     if (cssW < 2 || cssH < 2) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const aspect = this.charAspect();
+    // Match the backing store to the element's device pixels so glyphs are not resampled.
+    // Only very large surfaces drop below device pixel ratio.
     let scale = dpr;
-    let cellH = 0;
-    let cellW = 0;
-    let cols = 0;
-    let rows = 0;
-    for (let guard = 0; guard < 8; guard++) {
-      cellH = Math.max(4, Math.round(this.options.cellSize * scale));
-      cellW = Math.max(2, Math.round(cellH * aspect));
-      cols = Math.max(1, Math.floor((cssW * scale) / cellW));
-      rows = Math.max(1, Math.floor((cssH * scale) / cellH));
-      if ((cols * cellW <= 1440 && rows * cellH <= 900) || scale <= 0.75) break;
-      scale *= 0.85;
+    if (cssW * cssH * scale * scale > MAX_CANVAS_PIXELS) {
+      scale = Math.max(0.5, Math.sqrt(MAX_CANVAS_PIXELS / (cssW * cssH)));
     }
-    const key = `${cols}x${rows}:${cellW}x${cellH}:${this.options.fontFamily}`;
+    const width = Math.max(1, Math.round(cssW * scale));
+    const height = Math.max(1, Math.round(cssH * scale));
+    const cellH = Math.max(4, Math.round(this.options.cellSize * scale));
+    const cellW = Math.max(2, Math.round(cellH * aspect));
+    const cols = Math.max(1, Math.floor(width / cellW));
+    const rows = Math.max(1, Math.floor(height / cellH));
+    const key = `${width}x${height}:${cols}x${rows}:${cellW}x${cellH}:${this.options.fontFamily}`;
     if (key === this.layoutKey) return;
     this.layoutKey = key;
     this.cols = cols;
     this.rows = rows;
     this.cellW = cellW;
     this.cellH = cellH;
-    this.canvas.width = Math.max(1, cols * cellW);
-    this.canvas.height = Math.max(1, rows * cellH);
+    this.originX = Math.floor((width - cols * cellW) / 2);
+    this.originY = Math.floor((height - rows * cellH) / 2);
+    this.canvas.width = width;
+    this.canvas.height = height;
     this.needsCapture = true;
     this.floydDirty = true;
     this.atlasKey = '';
   }
 
   private photoSize(): { w: number; h: number } {
-    const cssW = Math.max(2, this.observeTarget.clientWidth || this.canvas.width);
-    const cssH = Math.max(2, this.observeTarget.clientHeight || this.canvas.height);
+    const box = this.cssSize();
+    const cssW = Math.max(2, box.w || this.canvas.width);
+    const cssH = Math.max(2, box.h || this.canvas.height);
     const limit = 960;
     if (cssW >= cssH) {
       const w = Math.min(limit, Math.round(cssW));
@@ -666,15 +694,38 @@ class Renderer {
       this.sample.height = target.h;
     }
     const ctx = this.sampleCtx;
-    ctx.fillStyle = this.options.background;
-    ctx.fillRect(0, 0, target.w, target.h);
+    ctx.clearRect(0, 0, target.w, target.h);
     const rect = fitRect(size.w, size.h, target.w, target.h, this.options.fit);
     if (rect.sw <= 0 || rect.sh <= 0) return false;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(src, rect.sx, rect.sy, rect.sw, rect.sh, rect.dx, rect.dy, rect.dw, rect.dh);
-    if (mode === 'grid') this.sampleRGBA = ctx.getImageData(0, 0, target.w, target.h).data;
+    try {
+      // Photo mode uploads the canvas to WebGL, which rejects tainted pixels the same way.
+      if (mode === 'grid') this.sampleRGBA = ctx.getImageData(0, 0, target.w, target.h).data;
+      else ctx.getImageData(0, 0, 1, 1);
+    } catch (error) {
+      this.rejectSource(error);
+      return false;
+    }
     return true;
+  }
+
+  /** A cross-origin source without CORS taints the sampler. Drop it and report once. */
+  private rejectSource(error: unknown) {
+    this.detachOwned();
+    this.frameSource = null;
+    this.sampleRGBA = null;
+    this.lastIndices = null;
+    this.lastBlank = null;
+    this.needsCapture = false;
+    const insecure = error instanceof DOMException && error.name === 'SecurityError';
+    const message = insecure
+      ? 'The source is cross-origin without CORS, so its pixels cannot be read'
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    this.options.onError?.(new Error(message));
   }
 
   private gridSampleSize(): { w: number; h: number } {
@@ -700,16 +751,17 @@ class Renderer {
         : glyphFloydIndices(glyphLumaField(common), this.cols, this.rows, this.charset.chars.length);
   }
 
+  /** Pointer and cell size in CSS pixels, relative to the grid origin. */
   private pointerSpace(): { x: number; y: number; cellW: number; cellH: number; influence: number } {
     const rect = this.canvas.getBoundingClientRect();
-    const cellW = rect.width / Math.max(1, this.cols);
-    const cellH = rect.height / Math.max(1, this.rows);
+    const sx = rect.width / Math.max(1, this.canvas.width);
+    const sy = rect.height / Math.max(1, this.canvas.height);
     const interaction = this.currentInteraction();
     return {
-      x: this.pointer.x,
-      y: this.pointer.y,
-      cellW,
-      cellH,
+      x: this.pointer.x - this.originX * sx,
+      y: this.pointer.y - this.originY * sy,
+      cellW: this.cellW * sx,
+      cellH: this.cellH * sy,
       influence: interaction === 'none' ? 0 : this.influence.x,
     };
   }
@@ -777,6 +829,7 @@ class Renderer {
       floydBase: dither === 'floyd-steinberg' ? this.floydBase : null,
     });
     this.lastIndices = field.indices;
+    this.lastBlank = field.blank;
     if (this.gl && this.glyphProg) this.drawGlyphs(field.instances, this.cols * this.rows, bg);
     else if (this.ctx2d) this.paint2D(this.ctx2d, field, bg);
     else this.clear();
@@ -824,6 +877,7 @@ class Renderer {
       floydBase: textDither === 'floyd-steinberg' ? this.floydBase : null,
     });
     this.lastIndices = field.indices;
+    this.lastBlank = field.blank;
   }
 
   private clear() {
@@ -888,7 +942,9 @@ class Renderer {
     gl.enableVertexAttribArray(3);
     gl.vertexAttribPointer(3, 3, gl.FLOAT, false, stride, 12);
     gl.vertexAttribDivisor(3, 1);
-    gl.uniform2f(gl.getUniformLocation(program, 'uGrid'), this.cols, this.rows);
+    gl.uniform2f(gl.getUniformLocation(program, 'uOrigin'), this.originX, this.originY);
+    gl.uniform2f(gl.getUniformLocation(program, 'uCanvasPx'), this.canvas.width, this.canvas.height);
+    gl.uniform2f(gl.getUniformLocation(program, 'uCellPx'), this.cellW, this.cellH);
     gl.uniform1f(gl.getUniformLocation(program, 'uStyle'), this.charset.kind === 'braille' ? 1 : 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
@@ -896,13 +952,11 @@ class Renderer {
     if (this.atlas && this.charset.kind !== 'braille') {
       gl.uniform2f(gl.getUniformLocation(program, 'uAtlasGrid'), this.atlas.cols, this.atlas.rows);
       gl.uniform2f(gl.getUniformLocation(program, 'uSlotPx'), this.atlas.slotW, this.atlas.slotH);
-      gl.uniform2f(gl.getUniformLocation(program, 'uCellPx'), this.atlas.cellW, this.atlas.cellH);
       gl.uniform2f(gl.getUniformLocation(program, 'uAtlasPx'), this.atlas.canvas.width, this.atlas.canvas.height);
     } else {
       gl.uniform2f(gl.getUniformLocation(program, 'uAtlasGrid'), 1, 1);
       gl.uniform2f(gl.getUniformLocation(program, 'uSlotPx'), 1, 1);
       gl.uniform2f(gl.getUniformLocation(program, 'uAtlasPx'), 1, 1);
-      gl.uniform2f(gl.getUniformLocation(program, 'uCellPx'), this.cellW, this.cellH);
     }
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, count);
   }
@@ -914,6 +968,8 @@ class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, this.sourceTex);
     // The fullscreen triangle samples v=0 at the top of the screen.
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    // Straight alpha: the shader reads letterbox texels by their alpha.
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.sample);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -957,10 +1013,12 @@ class Renderer {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
-  private paint2D(ctx: CanvasRenderingContext2D, field: { instances: Float32Array; indices: Uint8Array }, bg: RGB) {
+  private paint2D(ctx: CanvasRenderingContext2D, field: CellField, bg: RGB) {
     ctx.fillStyle = cssColor(bg);
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     const chars = this.charset.chars;
+    const ox = this.originX;
+    const oy = this.originY;
     if (this.charset.kind === 'braille') {
       const rad = Math.min(this.cellW, this.cellH) * 0.16;
       const count = this.cols * this.rows;
@@ -969,11 +1027,12 @@ class Renderer {
         const destX = field.instances[o] ?? 0;
         const destY = field.instances[o + 1] ?? 0;
         const mask = field.instances[o + 2] ?? 0;
+        if (mask <= 0) continue;
         ctx.fillStyle = cssColor({ r: field.instances[o + 3] ?? 1, g: field.instances[o + 4] ?? 1, b: field.instances[o + 5] ?? 1 });
         for (const dot of BRAILLE_DOTS) {
           if ((mask & (1 << dot.bit)) === 0) continue;
           ctx.beginPath();
-          ctx.arc((destX + dot.x) * this.cellW, (destY + dot.y) * this.cellH, rad, 0, Math.PI * 2);
+          ctx.arc(ox + (destX + dot.x) * this.cellW, oy + (destY + dot.y) * this.cellH, rad, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -984,11 +1043,12 @@ class Renderer {
     ctx.textBaseline = 'middle';
     const count = this.cols * this.rows;
     for (let i = 0; i < count; i++) {
+      if (field.blank[i]) continue;
       const ch = chars[field.indices[i] ?? 0];
       if (!ch || ch === ' ') continue;
       const o = i * 6;
       ctx.fillStyle = cssColor({ r: field.instances[o + 3] ?? 1, g: field.instances[o + 4] ?? 1, b: field.instances[o + 5] ?? 1 });
-      ctx.fillText(ch, ((field.instances[o] ?? 0) + 0.5) * this.cellW, ((field.instances[o + 1] ?? 0) + 0.5) * this.cellH);
+      ctx.fillText(ch, ox + ((field.instances[o] ?? 0) + 0.5) * this.cellW, oy + ((field.instances[o + 1] ?? 0) + 0.5) * this.cellH);
     }
   }
 

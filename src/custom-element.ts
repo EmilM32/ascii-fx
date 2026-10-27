@@ -1,4 +1,4 @@
-import { ATTRIBUTE_NAMES, attributesToOptions } from './attributes';
+import { ATTRIBUTE_NAMES, attributesToOptions, removedAttributeOptions } from './attributes';
 import { createAsciiFx } from './renderer';
 import type { AsciiFx, AsciiFxOptions, AsciiFxSnapshot, AsciiFxSource } from './types';
 
@@ -34,8 +34,11 @@ export class AsciiFxElement extends HTMLElement {
     const stage = document.createElement('div');
     stage.id = 'stage';
     root.append(style, stage);
+    const options = this.readOptions();
+    // A source set as a property before connecting, or kept across a move in the DOM, wins over `src`.
+    if (this.objectSource !== undefined) options.source = this.objectSource;
     this.fx = createAsciiFx(stage, {
-      ...this.readOptions(),
+      ...options,
       onError: (error) => {
         this.dispatchEvent(new CustomEvent('ascii-fx-error', { detail: { message: error.message }, bubbles: true, composed: true }));
       },
@@ -53,7 +56,7 @@ export class AsciiFxElement extends HTMLElement {
     this.webcamReady = false;
   }
 
-  attributeChangedCallback(name: string) {
+  attributeChangedCallback(name: string, _previous: string | null, value: string | null) {
     if (!this.fx) return;
     if (name === 'webcam') {
       void this.syncWebcam();
@@ -61,7 +64,9 @@ export class AsciiFxElement extends HTMLElement {
     }
     if (name === 'src') this.objectSource = undefined;
     const partial = this.readOptions();
-    if (this.objectSource && name !== 'src') delete partial.source;
+    if (value === null) Object.assign(partial, removedAttributeOptions(name));
+    // The camera and a property source both override `src` until they are removed.
+    if (this.webcamReady || this.objectSource !== undefined) delete partial.source;
     this.fx.update(partial);
   }
 
@@ -106,9 +111,8 @@ export class AsciiFxElement extends HTMLElement {
     if (!want) {
       const wasOn = this.webcamReady || this.stream != null;
       this.stopWebcam();
-      if (wasOn && !this.objectSource) {
-        const src = this.getAttribute('src');
-        if (src) this.fx?.update({ source: src });
+      if (wasOn && this.objectSource === undefined) {
+        this.fx?.update({ source: this.getAttribute('src') || undefined });
       }
       return;
     }

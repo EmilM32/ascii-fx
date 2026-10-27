@@ -91,7 +91,7 @@ Set an object source on the element: `el.source = stream`. `el.toPNG()`, `el.toT
 
 `braille` samples a 2×4 dot per cell and draws the matching pattern (U+2800–U+28FF in `toText()`). Floyd–Steinberg is for still images. Video and camera streams use Bayer while that mode is selected, so the diffusion doesn’t crawl. `toText()` in halftone mode exports the glyph reading, not dots. `toPNG()` exports the pixels on screen.
 
-`prefers-reduced-motion: reduce` disables pointer effects and holds video on a still frame unless you pass `reducedMotion: 'allow'`. Offscreen elements pause via `IntersectionObserver`. The backing store is capped around 1440×900 and follows device pixel ratio up to 2.
+`prefers-reduced-motion: reduce` disables pointer effects and holds video on a still frame unless you pass `reducedMotion: 'allow'`. Offscreen elements pause via `IntersectionObserver`. The backing store matches the element's device pixels (device pixel ratio up to 2) so glyphs stay sharp, and drops below that only past about 4 megapixels. With `fit: 'contain'` or a transparent source, cells outside the picture stay empty.
 
 ## Options
 

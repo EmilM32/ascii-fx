@@ -4,14 +4,18 @@ layout(location = 1) in vec2 aDest;
 layout(location = 2) in float aIndex;
 layout(location = 3) in vec3 aInk;
 
-uniform vec2 uGrid;
+// Cell size, grid origin, and canvas size in device pixels. The origin centers
+// the grid when the canvas is not a whole number of cells.
+uniform vec2 uCellPx;
+uniform vec2 uOrigin;
+uniform vec2 uCanvasPx;
 out vec2 vLocal;
 flat out float vIndex;
 flat out vec3 vInk;
 
 void main() {
-  vec2 pos = aDest + aCorner;
-  vec2 ndc = vec2(pos.x / uGrid.x * 2.0 - 1.0, 1.0 - pos.y / uGrid.y * 2.0);
+  vec2 pos = uOrigin + (aDest + aCorner) * uCellPx;
+  vec2 ndc = vec2(pos.x / uCanvasPx.x * 2.0 - 1.0, 1.0 - pos.y / uCanvasPx.y * 2.0);
   gl_Position = vec4(ndc, 0.0, 1.0);
   vLocal = aCorner;
   vIndex = aIndex;
@@ -61,6 +65,8 @@ float brailleAlpha(float mask) {
 }
 
 void main() {
+  // Index -1 marks a cell outside the picture.
+  if (vIndex < -0.5) discard;
   float alpha;
   if (uStyle > 0.5) {
     alpha = brailleAlpha(vIndex);
@@ -144,7 +150,13 @@ void main() {
   if (uInteraction > 0.5 && uInteraction < 1.5) {
     samplePx += dir * fall * uStrength * min(uRadius, 280.0) * 0.22;
   }
-  vec3 src = adjust(texture(uSource, samplePx / uResolution).rgb);
+  vec4 texel = texture(uSource, samplePx / uResolution);
+  // Transparent texels are letterbox or transparent source pixels: paper only.
+  if (texel.a < 0.5) {
+    oColor = vec4(uBg, 1.0);
+    return;
+  }
+  vec3 src = adjust(texel.rgb);
   float v = luma(src);
   if (uInteraction > 1.5 && uInteraction < 2.5) {
     float lift = fall * uStrength * 0.85;
@@ -159,10 +171,19 @@ void main() {
   }
   vec3 col;
   if (uColorMode > 0.5 && uColorMode < 1.5) {
-    float rs = dotScreen(samplePx, radians(15.0) + ang, src.r, pitch);
-    float gs = dotScreen(samplePx, radians(75.0) + ang, src.g, pitch);
-    float bs = dotScreen(samplePx, ang, src.b, pitch);
-    col = uBg + vec3(rs, gs, bs) * (vec3(1.0) - uBg);
+    if (luma(uBg) > 0.5) {
+      // Light paper: subtractive CMY screens. Cyan absorbs red, magenta green, yellow blue.
+      float cs = dotScreen(samplePx, radians(15.0) + ang, 1.0 - src.r, pitch);
+      float ms = dotScreen(samplePx, radians(75.0) + ang, 1.0 - src.g, pitch);
+      float ys = dotScreen(samplePx, ang, 1.0 - src.b, pitch);
+      col = uBg * (vec3(1.0) - vec3(cs, ms, ys));
+    } else {
+      // Dark paper: additive RGB screens.
+      float rs = dotScreen(samplePx, radians(15.0) + ang, src.r, pitch);
+      float gs = dotScreen(samplePx, radians(75.0) + ang, src.g, pitch);
+      float bs = dotScreen(samplePx, ang, src.b, pitch);
+      col = uBg + vec3(rs, gs, bs) * (vec3(1.0) - uBg);
+    }
   } else {
     vec3 ink = uFg;
     if (uColorMode > 1.5) ink = mix(mix(uBg, uFg, 0.28), uFg, v);
