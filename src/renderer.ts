@@ -583,8 +583,8 @@ class Renderer {
     const dt = Math.min(0.05, this.then ? (now - this.then) / 1000 : 0.016);
     this.then = now;
     if (!this.motionReduced()) {
-      this.pointer.step(dt, 250, 24);
-      this.influence.step(dt, 170, 22);
+      this.pointer.step(dt, 280, 22);
+      this.influence.step(dt, 420, 28);
     }
     this.draw();
     this.lastDraw = now;

@@ -249,7 +249,7 @@ export function buildCells(input: BuildCellsInput): CellField {
         const cx = (x + 0.5) * input.cellCssW - input.pointerX;
         const cy = (y + 0.5) * input.cellCssH - input.pointerY;
         const dist = Math.hypot(cx, cy) || 0.0001;
-        const mag = fall * input.strength * 1.85 * input.cellCssH;
+        const mag = fall * input.strength * 4.6 * input.cellCssH;
         const dirx = cx / dist;
         const diry = cy / dist;
         const swirl = 0.42;

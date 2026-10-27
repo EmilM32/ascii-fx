@@ -14,7 +14,7 @@ npm i ascii-fx
 
 The package is ESM. `ascii-fx` is the renderer. `ascii-fx/element` registers the custom element and is the only entry with a side effect.
 
-Gzipped `dist/index.js`: **14.79 kB**. The custom-element entry (`dist/element.js`) is a few lines that register `<ascii-fx>` and re-export the class.
+Gzipped `dist/index.js`: **14.78 kB**. The custom-element entry (`dist/element.js`) is a few lines that register `<ascii-fx>` and re-export the class.
 
 ## JavaScript
 
