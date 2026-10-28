@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-10-28
+
+### Added
+
+- `invalidate()` draws one frame from the current source and leaves the loop stopped. A paused effect, reduced motion, and a `<canvas>` source whose pixels changed all refresh on that call, including inside the frame cap.
+
 ## [0.1.2] - 2026-10-27
 
 ### Fixed
@@ -39,6 +45,7 @@ All notable changes to this project are documented here. The format follows
 - Pointer interactions: `repel`, `brighten`, `swap`.
 - Sources: images, video, canvas, and camera streams. Exports: `toPNG()` and `toText()`.
 
+[0.1.3]: https://github.com/EmilM32/ascii-fx/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/EmilM32/ascii-fx/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/EmilM32/ascii-fx/compare/61a7d18...v0.1.1
 [0.1.0]: https://github.com/EmilM32/ascii-fx/commit/61a7d18
