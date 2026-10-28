@@ -85,6 +85,10 @@ export class AsciiFxElement extends HTMLElement {
     this.setAttribute('paused', '');
   }
 
+  invalidate() {
+    this.fx?.invalidate();
+  }
+
   destroy() {
     this.disconnectedCallback();
   }

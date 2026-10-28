@@ -326,6 +326,14 @@ class Renderer {
     this.syncPlayback();
   }
 
+  invalidate() {
+    if (!this.alive) return;
+    this.needsCapture = true;
+    // A stopped loop will not come back, so the frame cap must not drop this paint.
+    this.lastDraw = 0;
+    this.poke();
+  }
+
   destroy() {
     if (!this.alive) return;
     this.alive = false;
@@ -1082,6 +1090,7 @@ export function createAsciiFx(target: HTMLElement, options?: Partial<AsciiFxOpti
     update: (next) => renderer.update(next),
     play: () => renderer.play(),
     pause: () => renderer.pause(),
+    invalidate: () => renderer.invalidate(),
     destroy: () => renderer.destroy(),
     toPNG: () => renderer.toPNG(),
     toText: () => renderer.toText(),

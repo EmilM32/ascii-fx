@@ -14,7 +14,7 @@ npm i ascii-fx
 
 The package is ESM. `ascii-fx` is the renderer. `ascii-fx/element` registers the custom element and is the only entry with a side effect.
 
-Gzipped `dist/index.js`: **15.84 kB**. The custom-element entry (`dist/element.js`) is a few lines that register `<ascii-fx>` and re-export the class.
+Gzipped `dist/index.js`: **15.86 kB**. The custom-element entry (`dist/element.js`) is a few lines that register `<ascii-fx>` and re-export the class.
 
 ## JavaScript
 
@@ -38,6 +38,7 @@ fx.update({ dither: 'halftone' });
 await fx.toPNG(); // Blob
 fx.toText();      // plain ASCII of the current frame
 fx.pause();
+fx.invalidate(); // one frame from the current source; the loop stays stopped
 fx.destroy();
 ```
 
@@ -64,7 +65,7 @@ fx.destroy();
 ></ascii-fx>
 ```
 
-Set an object source on the element: `el.source = stream`. `el.toPNG()`, `el.toText()`, `el.play()`, `el.pause()`, and `el.getSnapshot()` match the JS handle. Failures dispatch `ascii-fx-error`. The first frame dispatches `ascii-fx-ready`.
+Set an object source on the element: `el.source = stream`. `el.toPNG()`, `el.toText()`, `el.play()`, `el.pause()`, `el.invalidate()`, and `el.getSnapshot()` match the JS handle. Failures dispatch `ascii-fx-error`. The first frame dispatches `ascii-fx-ready`.
 
 ### Attributes
 
@@ -91,7 +92,7 @@ Set an object source on the element: `el.source = stream`. `el.toPNG()`, `el.toT
 
 `braille` samples a 2×4 dot per cell and draws the matching pattern (U+2800–U+28FF in `toText()`). Floyd–Steinberg is for still images. Video and camera streams use Bayer while that mode is selected, so the diffusion doesn’t crawl. `toText()` in halftone mode exports the glyph reading, not dots. `toPNG()` exports the pixels on screen.
 
-`prefers-reduced-motion: reduce` disables pointer effects and holds video on a still frame unless you pass `reducedMotion: 'allow'`. Offscreen elements pause via `IntersectionObserver`. The backing store matches the element's device pixels (device pixel ratio up to 2) so glyphs stay sharp, and drops below that only past about 4 megapixels. With `fit: 'contain'` or a transparent source, cells outside the picture stay empty.
+`prefers-reduced-motion: reduce` disables pointer effects and holds video on a still frame unless you pass `reducedMotion: 'allow'`. Offscreen elements pause via `IntersectionObserver`. `invalidate()` draws a single fresh frame while that loop is stopped — paused, offscreen, hidden, or reduced motion — including when the source is a `<canvas>` whose pixels changed. The backing store matches the element's device pixels (device pixel ratio up to 2) so glyphs stay sharp, and drops below that only past about 4 megapixels. With `fit: 'contain'` or a transparent source, cells outside the picture stay empty.
 
 ## Options
 
@@ -109,6 +110,7 @@ Set an object source on the element: `el.source = stream`. `el.toPNG()`, `el.toT
 | --- | --- |
 | `update(partial)` | Merge options. A new `source` reloads. |
 | `play()` / `pause()` | The draw loop and owned video |
+| `invalidate()` | One frame from the current source. The loop stays stopped |
 | `destroy()` | Observers, video element, WebGL context |
 | `toPNG()` | `Promise<Blob>` |
 | `toText()` | Glyphs of the current frame, one row per line |

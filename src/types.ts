@@ -118,6 +118,8 @@ export interface AsciiFx {
   update(options: Partial<AsciiFxOptions>): void;
   play(): void;
   pause(): void;
+  /** Draw one frame from the current source. Does not resume the loop. */
+  invalidate(): void;
   destroy(): void;
   toPNG(): Promise<Blob>;
   /** Glyph reading of the current frame. Halftone exports the underlying ramp. */
