@@ -4,6 +4,7 @@ import { parseColor, cssColor, type RGB } from './color';
 import { resolveCharset, type ResolvedCharset } from './charset';
 import { resolveDither } from './dither';
 import { fitRect } from './fit';
+import { halftoneScreens, paintHalftone2D } from './halftone';
 import {
   BRAILLE_DOTS,
   brailleFloydMasks,
@@ -13,7 +14,7 @@ import {
   glyphLumaField,
   indicesToText,
 } from './raster';
-import { GLYPH_FS, GLYPH_VS, HALFTONE_FS, HALFTONE_VS } from './shaders';
+import { GLYPH_FS, GLYPH_VS, HALFTONE_FS, HALFTONE_VS, SCREEN_FS } from './shaders';
 import type { AsciiFx, AsciiFxOptions, AsciiFxSnapshot, AsciiFxSource, DitherMode, InteractionMode, ResolvedAsciiFxOptions } from './types';
 
 const VIDEO_URL = /\.(mp4|webm|ogg|mov)(?:[?#].*)?$/i;
@@ -202,6 +203,9 @@ class Renderer {
   private ctx2d: CanvasRenderingContext2D | null = null;
   private glyphProg: WebGLProgram | null = null;
   private halfProg: WebGLProgram | null = null;
+  private screenProg: WebGLProgram | null = null;
+  /** The sampler holds a photo capture that the source texture does not have yet. */
+  private sourceTexDirty = true;
   private quadBuf: WebGLBuffer | null = null;
   private clipBuf: WebGLBuffer | null = null;
   private instanceBuf: WebGLBuffer | null = null;
@@ -293,6 +297,7 @@ class Renderer {
     if ('source' in partial && partial.source !== prev.source) void this.load(this.options.source);
     if (this.options.cellSize !== prev.cellSize || this.options.fontFamily !== prev.fontFamily) this.layoutKey = '';
     if (
+      this.options.mode !== prev.mode ||
       this.options.charset !== prev.charset ||
       this.options.contrast !== prev.contrast ||
       this.options.brightness !== prev.brightness ||
@@ -362,7 +367,7 @@ class Renderer {
   }
 
   toText(): string {
-    if (!this.lastIndices || this.displayDither() === 'halftone') this.drawText();
+    if (!this.lastIndices || this.options.mode === 'halftone' || this.displayDither() === 'halftone') this.drawText();
     const text = this.lastIndices
       ? indicesToText(this.lastIndices, this.cols, this.rows, this.charset.chars, this.lastBlank)
       : '';
@@ -377,6 +382,7 @@ class Renderer {
       cols: this.cols,
       rows: this.rows,
       renderer: this.gl ? 'webgl2' : 'canvas2d',
+      mode: this.options.mode,
       fps: Math.round(this.fps),
       active: this.raf !== 0,
       dither: this.displayDither(),
@@ -404,10 +410,12 @@ class Renderer {
     try {
       this.glyphProg = link(gl, GLYPH_VS, GLYPH_FS);
       this.halfProg = link(gl, HALFTONE_VS, HALFTONE_FS);
+      this.screenProg = link(gl, HALFTONE_VS, SCREEN_FS);
     } catch (error) {
       console.error(error);
       this.glyphProg = null;
       this.halfProg = null;
+      this.screenProg = null;
     }
     this.quadBuf = gl.createBuffer();
     this.clipBuf = gl.createBuffer();
@@ -529,9 +537,17 @@ class Renderer {
   private isLive(): boolean {
     const src = this.frameSource;
     if (!src || this.motionReduced() || !this.playing || !this.visible || this.pageHidden) return false;
-    if (src instanceof HTMLVideoElement) return !src.paused && src.readyState >= 2;
+    // A playing video stays live while it buffers (a loop seam drops readyState for a moment),
+    // so the loop keeps polling instead of stopping on a frame nothing will restart.
+    if (src instanceof HTMLVideoElement) return !src.paused;
     if (src instanceof HTMLCanvasElement) return true;
     return false;
+  }
+
+  /** A playing video with no current frame. Draws keep the last picture until it returns. */
+  private videoBuffering(): boolean {
+    const src = this.frameSource;
+    return src instanceof HTMLVideoElement && !src.paused && src.readyState < 2;
   }
 
   private syncPlayback() {
@@ -690,13 +706,18 @@ class Renderer {
     return { w: Math.max(2, Math.round(h * (cssW / cssH))), h: Math.max(2, h) };
   }
 
-  private capture(mode: 'grid' | 'photo'): boolean {
+  /**
+   * `grid`: one sample per cell (or braille dot), read back for glyphs.
+   * `photo`: the canvas aspect at up to 960 px, uploaded to WebGL.
+   * `screen`: about two samples per halftone cell across the canvas, read back for Canvas2D.
+   */
+  private capture(mode: 'grid' | 'photo' | 'screen'): boolean {
     const src = this.frameSource;
     if (!src) return false;
     if (src instanceof HTMLVideoElement && src.readyState < 2) return false;
     const size = sourceSize(src);
     if (size.w < 2 || size.h < 2) return false;
-    const target = mode === 'photo' ? this.photoSize() : this.gridSampleSize();
+    const target = mode === 'photo' ? this.photoSize() : mode === 'screen' ? this.screenSampleSize() : this.gridSampleSize();
     if (this.sample.width !== target.w || this.sample.height !== target.h) {
       this.sample.width = target.w;
       this.sample.height = target.h;
@@ -705,7 +726,12 @@ class Renderer {
     ctx.clearRect(0, 0, target.w, target.h);
     // Fit in display space, then scale into the sampler. Grid samples are not square:
     // one per cell (or per braille dot), so fitting in sample space would stretch the picture.
-    const frame = mode === 'photo' ? target : { w: this.cols * this.cellW, h: this.rows * this.cellH };
+    const frame =
+      mode === 'photo'
+        ? target
+        : mode === 'screen'
+          ? { w: this.canvas.width, h: this.canvas.height }
+          : { w: this.cols * this.cellW, h: this.rows * this.cellH };
     const rect = fitRect(size.w, size.h, frame.w, frame.h, this.options.fit);
     if (rect.sw <= 0 || rect.sh <= 0) return false;
     const kx = target.w / frame.w;
@@ -715,8 +741,12 @@ class Renderer {
     ctx.drawImage(src, rect.sx, rect.sy, rect.sw, rect.sh, rect.dx * kx, rect.dy * ky, rect.dw * kx, rect.dh * ky);
     try {
       // Photo mode uploads the canvas to WebGL, which rejects tainted pixels the same way.
-      if (mode === 'grid') this.sampleRGBA = ctx.getImageData(0, 0, target.w, target.h).data;
-      else ctx.getImageData(0, 0, 1, 1);
+      if (mode === 'photo') {
+        ctx.getImageData(0, 0, 1, 1);
+        this.sourceTexDirty = true;
+      } else {
+        this.sampleRGBA = ctx.getImageData(0, 0, target.w, target.h).data;
+      }
     } catch (error) {
       this.rejectSource(error);
       return false;
@@ -739,6 +769,25 @@ class Renderer {
         ? error.message
         : String(error);
     this.options.onError?.(new Error(message));
+  }
+
+  /** Halftone cell size in device pixels. */
+  private screenPitch(): number {
+    return Math.max(2, this.options.cellSize * this.deviceScale());
+  }
+
+  /** Device pixels per CSS pixel of the backing store. */
+  private deviceScale(): number {
+    const box = this.cssSize();
+    return box.w > 0 ? this.canvas.width / box.w : 1;
+  }
+
+  private screenSampleSize(): { w: number; h: number } {
+    const step = Math.max(1, this.screenPitch() / 2);
+    return {
+      w: Math.max(2, Math.ceil(this.canvas.width / step)),
+      h: Math.max(2, Math.ceil(this.canvas.height / step)),
+    };
   }
 
   private gridSampleSize(): { w: number; h: number } {
@@ -787,11 +836,16 @@ class Renderer {
       this.clear();
       return;
     }
+    if (this.options.mode === 'halftone') {
+      this.drawScreen();
+      return;
+    }
     const dither = this.displayDither();
     const halftone = dither === 'halftone' && this.gl !== null && this.halfProg !== null;
     if (this.needsCapture || this.isLive()) {
       const ok = this.capture(halftone ? 'photo' : 'grid');
       if (!ok) {
+        if (this.videoBuffering()) return;
         this.needsCapture = this.frameSource != null;
         this.clear();
         return;
@@ -850,6 +904,124 @@ class Renderer {
     this.maybeReady();
   }
 
+  /** `mode: 'halftone'`: WebGL2 screen shader, or the Canvas2D painter without it. */
+  private drawScreen() {
+    const gpu = this.gl !== null && this.screenProg !== null;
+    if (this.needsCapture || this.isLive()) {
+      const ok = this.capture(gpu ? 'photo' : 'screen');
+      if (!ok) {
+        if (this.videoBuffering()) return;
+        this.needsCapture = this.frameSource != null;
+        this.clearTo(this.options.paper);
+        return;
+      }
+      this.needsCapture = false;
+    }
+    if (gpu) {
+      this.drawScreenGL();
+    } else if (this.ctx2d && this.sampleRGBA) {
+      const box = this.canvas.getBoundingClientRect();
+      const scale = box.width > 0 ? this.canvas.width / box.width : 1;
+      const interaction = this.currentInteraction();
+      paintHalftone2D(this.ctx2d, {
+        rgba: this.sampleRGBA,
+        sampleWidth: this.sample.width,
+        sampleHeight: this.sample.height,
+        width: this.canvas.width,
+        height: this.canvas.height,
+        pitch: this.screenPitch(),
+        angle: (this.options.angle * Math.PI) / 180,
+        shape: this.options.shape,
+        palette: this.options.palette,
+        ink: parseColor(this.options.ink),
+        paper: parseColor(this.options.paper),
+        contrast: this.options.contrast,
+        brightness: this.options.brightness,
+        invert: this.options.invert,
+        interaction,
+        pointerX: this.pointer.x * scale,
+        pointerY: this.pointer.y * scale,
+        radius: this.options.radius * scale,
+        strength: this.options.strength,
+        influence: interaction === 'none' ? 0 : this.influence.x,
+      });
+    } else {
+      this.clearTo(this.options.paper);
+      return;
+    }
+    this.noteFrame();
+    this.maybeReady();
+  }
+
+  private drawScreenGL() {
+    const gl = this.gl;
+    const program = this.screenProg;
+    if (!gl || !program || !this.clipBuf || !this.sourceTex) return;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.sourceTex);
+    if (this.sourceTexDirty) {
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.sample);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      this.sourceTexDirty = false;
+    }
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? this.canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? this.canvas.height / rect.height : 1;
+    const pitch = this.screenPitch();
+    // Mip level whose texels are about one cell wide, so a lookup is the cell's mean tone.
+    const texelsPerCell = pitch * (this.sample.width / Math.max(1, this.canvas.width));
+    const lod = Math.max(0, Math.log2(Math.max(1, texelsPerCell)) - 0.5);
+    const ink = parseColor(this.options.ink);
+    const paper = parseColor(this.options.paper);
+    const interaction = this.currentInteraction();
+    const mode = interaction === 'repel' ? 1 : interaction === 'brighten' ? 2 : interaction === 'swap' ? 3 : 0;
+    const shape = { dot: 0, square: 1, line: 2, diamond: 3 }[this.options.shape];
+    const palette = { mono: 0, cmyk: 1, source: 2 }[this.options.palette];
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.disable(gl.BLEND);
+    gl.useProgram(program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.clipBuf);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(0, 0);
+    gl.disableVertexAttribArray(1);
+    gl.disableVertexAttribArray(2);
+    gl.disableVertexAttribArray(3);
+    const u = (name: string) => gl.getUniformLocation(program, name);
+    gl.uniform1i(u('uSource'), 0);
+    gl.uniform2f(u('uResolution'), this.canvas.width, this.canvas.height);
+    gl.uniform1f(u('uPitch'), pitch);
+    gl.uniform1f(u('uLod'), lod);
+    // Column-major mat2 per channel slot (K, C, M, Y), mapping screen to grid: rows (c, s), (-s, c).
+    const rotations = new Float32Array(16);
+    const slot = { k: 0, c: 1, m: 2, y: 3 } as const;
+    for (const screen of halftoneScreens('cmyk', this.options.angle)) {
+      const c = Math.cos(screen.angle);
+      const s = Math.sin(screen.angle);
+      rotations.set([c, -s, s, c], slot[screen.channel] * 4);
+    }
+    gl.uniformMatrix2fv(u('uRot'), false, rotations);
+    gl.uniform1i(u('uShape'), shape);
+    gl.uniform1i(u('uPalette'), palette);
+    gl.uniform3f(u('uInk'), ink.r, ink.g, ink.b);
+    gl.uniform3f(u('uPaper'), paper.r, paper.g, paper.b);
+    gl.uniform1f(u('uContrast'), this.options.contrast);
+    gl.uniform1f(u('uBrightness'), this.options.brightness);
+    gl.uniform1f(u('uInvert'), this.options.invert ? 1 : 0);
+    gl.uniform2f(u('uPointer'), this.pointer.x * scaleX, this.pointer.y * scaleY);
+    gl.uniform1f(u('uRadius'), this.options.radius * scaleY);
+    gl.uniform1f(u('uStrength'), this.options.strength);
+    gl.uniform1f(u('uInfluence'), interaction === 'none' ? 0 : this.influence.x);
+    gl.uniform1i(u('uInteraction'), mode);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
   private drawText() {
     this.charset = resolveCharset(this.options.charset);
     this.layout();
@@ -894,7 +1066,11 @@ class Renderer {
   }
 
   private clear() {
-    const bg = parseColor(this.options.background);
+    this.clearTo(this.options.mode === 'halftone' ? this.options.paper : this.options.background);
+  }
+
+  private clearTo(color: string) {
+    const bg = parseColor(color);
     const gl = this.gl;
     if (gl) {
       gl.viewport(0, 0, this.canvas.width, this.canvas.height);
@@ -984,6 +1160,7 @@ class Renderer {
     // Straight alpha: the shader reads letterbox texels by their alpha.
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.sample);
+    this.sourceTexDirty = false;
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

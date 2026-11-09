@@ -186,6 +186,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 18px;
 }
+.controls .group { display: flex; flex-direction: column; gap: 14px; }
 .field, .check { display: flex; flex-direction: column; gap: 6px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .field span { display: flex; justify-content: space-between; }
 .field output { color: var(--ink); letter-spacing: 0; text-transform: none; }

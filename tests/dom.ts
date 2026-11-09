@@ -4,6 +4,7 @@
  */
 
 let sampleReads = 0;
+let marks = 0;
 const rafQueue = new Map<number, FrameRequestCallback>();
 let nextRaf = 1;
 
@@ -114,6 +115,7 @@ class FakeContext {
   textBaseline = 'alphabetic';
   imageSmoothingEnabled = true;
   imageSmoothingQuality: 'low' | 'medium' | 'high' = 'low';
+  globalCompositeOperation = 'source-over';
 
   constructor(
     private readonly canvas: FakeCanvas,
@@ -136,7 +138,21 @@ class FakeContext {
 
   beginPath() {}
 
-  arc() {}
+  arc() {
+    marks += 1;
+  }
+
+  moveTo() {}
+
+  lineTo() {}
+
+  closePath() {}
+
+  setTransform() {}
+
+  translate() {}
+
+  rotate() {}
 
   fill() {}
 
@@ -146,7 +162,9 @@ class FakeContext {
 
   clip() {}
 
-  rect() {}
+  rect() {
+    marks += 1;
+  }
 
   drawImage(
     image: CanvasImageSource,
@@ -283,6 +301,15 @@ export function fillCanvas(canvas: HTMLCanvasElement, r: number, g: number, b: n
 
 export function sampleReadsCount() {
   return sampleReads;
+}
+
+/** Halftone marks (and other arcs / rects) added to paths since the last reset. */
+export function marksCount() {
+  return marks;
+}
+
+export function resetMarks() {
+  marks = 0;
 }
 
 export function resetSampleReads() {

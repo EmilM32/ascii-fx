@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-09
+
+### Added
+
+- `mode: 'halftone'`: a print-style halftone screen in place of glyphs. One mark per cell of a grid rotated by `angle` (45° by default), sized by the cell's mean tone, so dark areas nearly merge. Works with images, video, canvas, and the camera, in WebGL2 with a Canvas2D fallback.
+- Halftone options: `angle`, `shape` (`dot`, `square`, `line`, `diamond`), `palette` (`mono`, `cmyk`, `source`), `ink`, and `paper`. `cellSize`, `contrast`, `brightness`, `invert`, and the pointer interactions apply as well. The `<ascii-fx>` element takes the same names as attributes, plus `mode`.
+- `cmyk` draws cyan, magenta, yellow, and black screens at the classic offsets around `angle` and multiplies them like ink, which produces the rosette.
+- `getSnapshot().mode`. Exports: `halftoneExtent`, `halftoneCoverage`, `halftoneScreens`, `rgbToCmyk`, `parseRenderMode`, `parseShape`, `parsePalette`, and the `RenderMode`, `HalftoneShape`, and `HalftonePalette` types.
+- Playground: an ASCII / Halftone switch with controls for the new options.
+
+### Fixed
+
+- A looping video no longer freezes on its first loop. At the loop seam the video has no current frame for a moment, and the draw loop used to stop there with nothing to restart it. It now keeps the last frame and continues when the video does.
+
 ## [0.1.3] - 2026-10-28
 
 ### Added
@@ -45,6 +59,7 @@ All notable changes to this project are documented here. The format follows
 - Pointer interactions: `repel`, `brighten`, `swap`.
 - Sources: images, video, canvas, and camera streams. Exports: `toPNG()` and `toText()`.
 
+[0.2.0]: https://github.com/EmilM32/ascii-fx/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/EmilM32/ascii-fx/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/EmilM32/ascii-fx/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/EmilM32/ascii-fx/compare/61a7d18...v0.1.1

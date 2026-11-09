@@ -193,3 +193,163 @@ void main() {
   oColor = vec4(col, 1.0);
 }
 `;
+
+/**
+ * `mode: 'halftone'`: a rotated screen of marks, one per cell, sized by the mean tone of
+ * that cell. The source texture is mipmapped and read at the cell's footprint, so a lookup
+ * is the cell average. Each pixel tests the four cells around its nearest grid corner,
+ * which covers every mark that can reach it (the largest dot has radius √2/2 cells).
+ * Shapes: 0 dot, 1 square, 2 line, 3 diamond. Palettes: 0 mono, 1 cmyk, 2 source.
+ */
+export const SCREEN_FS = `#version 300 es
+precision highp float;
+
+in vec2 vUv;
+out vec4 oColor;
+
+uniform sampler2D uSource;
+uniform vec2 uResolution;
+uniform float uPitch;
+uniform float uLod;
+// Screen → grid rotations, by channel: 0 K / mono, 1 C, 2 M, 3 Y.
+uniform mat2 uRot[4];
+uniform int uShape;
+uniform int uPalette;
+uniform vec3 uInk;
+uniform vec3 uPaper;
+uniform float uContrast;
+uniform float uBrightness;
+uniform float uInvert;
+uniform vec2 uPointer;
+uniform float uRadius;
+uniform float uStrength;
+uniform float uInfluence;
+uniform int uInteraction;
+
+const float PI = 3.14159265;
+const float HALF_DIAGONAL = 0.70710678;
+
+float clamp01(float v) { return clamp(v, 0.0, 1.0); }
+
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+vec3 adjust(vec3 c) {
+  if (uInvert > 0.5) c = vec3(1.0) - c;
+  float l = luma(c);
+  float l2 = clamp01((l - 0.5) * uContrast + 0.5 + uBrightness);
+  if (l <= 0.0001) return vec3(l2);
+  return clamp(c * (l2 / l), 0.0, 1.0);
+}
+
+// Mirrors halftoneExtent() in halftone.ts.
+float extent(float d) {
+  d = clamp01(d);
+  if (uShape == 1) return sqrt(d) * 0.5;
+  if (uShape == 2) return d * 0.5;
+  if (uShape == 3) return d <= 0.5 ? sqrt(d * 0.5) : 1.0 - sqrt((1.0 - d) * 0.5);
+  if (d <= PI * 0.25) return sqrt(d / PI);
+  return 0.5 + (HALF_DIAGONAL - 0.5) * ((d - PI * 0.25) / (1.0 - PI * 0.25));
+}
+
+float metric(vec2 q) {
+  if (uShape == 1) return max(abs(q.x), abs(q.y));
+  if (uShape == 2) return abs(q.y);
+  if (uShape == 3) return abs(q.x) + abs(q.y);
+  return length(q);
+}
+
+float falloffAt(vec2 px) {
+  float t = clamp01(1.0 - length(px - uPointer) / max(uRadius, 1.0));
+  return t * t * (3.0 - 2.0 * t) * uInfluence;
+}
+
+// Mirrors rgbToCmyk() in halftone.ts: half of the common gray goes to black.
+vec4 cmyk(vec3 c) {
+  vec3 cmy = vec3(1.0) - c;
+  float k = clamp01(min(cmy.x, min(cmy.y, cmy.z)) * 0.5);
+  return vec4(clamp((cmy - vec3(k)) / (1.0 - k), 0.0, 1.0), k);
+}
+
+// Ink amount for one screen. channel: 0 K / mono, 1 C, 2 M, 3 Y.
+float darkness(vec3 src, int channel) {
+  if (uPalette != 1) return 1.0 - luma(src);
+  vec4 cmy = cmyk(src);
+  if (channel == 0) return cmy.w;
+  if (channel == 1) return cmy.x;
+  if (channel == 2) return cmy.y;
+  return cmy.z;
+}
+
+// Farthest a mark can reach from its cell center, in the shape's metric.
+float maxExtent() {
+  if (uShape == 3) return 1.0;
+  if (uShape == 0) return HALF_DIAGONAL;
+  return 0.5;
+}
+
+// Coverage of the strongest mark at p; .rgb carries that mark's source color.
+// rot maps screen space (device pixels, origin at the canvas center) to grid space (cells).
+vec4 screenAt(vec2 p, mat2 rot, int channel, float lift, float flip) {
+  vec2 g = rot * (p - uResolution * 0.5) / uPitch;
+  mat2 back = transpose(rot) * uPitch;
+  vec2 base = floor(g - 0.5);
+  float aa = 0.7 / uPitch;
+  float reach = maxExtent() + aa;
+  // Lines only meet the rows above and below.
+  int columns = uShape == 2 ? 1 : 2;
+  vec4 best = vec4(0.0);
+  for (int j = 0; j < 2; j++) {
+    for (int i = 0; i < columns; i++) {
+      vec2 center = base + vec2(float(i), float(j)) + 0.5;
+      float dist = metric(g - center);
+      if (dist > reach) continue;
+      vec2 at = center;
+      // Lines follow the tone along their length, like an engraving.
+      if (uShape == 2) at.x = g.x;
+      vec2 uv = (back * at + uResolution * 0.5) / uResolution;
+      if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) continue;
+      vec4 texel = textureLod(uSource, uv, uLod);
+      // Letterbox and transparent pixels are paper. Mip levels average alpha, so un-weight the color.
+      if (texel.a < 0.5) continue;
+      vec3 src = adjust(texel.rgb / texel.a);
+      src = clamp(src + vec3(lift), 0.0, 1.0);
+      float d = darkness(src, channel);
+      d = mix(d, 1.0 - d, flip);
+      float size = extent(d);
+      if (size <= 0.0) continue;
+      float cov = clamp01((size - dist) / (2.0 * aa) + 0.5) * clamp01(size / aa);
+      if (cov > best.a) best = vec4(src, cov);
+    }
+  }
+  return best;
+}
+
+void main() {
+  vec2 px = vUv * uResolution;
+  float fall = falloffAt(px);
+  vec2 delta = px - uPointer;
+  float lift = 0.0;
+  float flip = 0.0;
+  // Repel magnifies around the pointer: the screen spreads out, so marks grow and move away.
+  if (uInteraction == 1) px = uPointer + delta * max(0.25, 1.0 - fall * uStrength * 0.45);
+  else if (uInteraction == 2) lift = fall * uStrength * 0.85;
+  else if (uInteraction == 3) flip = clamp01(fall * uStrength);
+
+  vec3 col = uPaper;
+  if (uPalette == 1) {
+    vec4 y = screenAt(px, uRot[3], 3, lift, flip);
+    vec4 c = screenAt(px, uRot[1], 1, lift, flip);
+    vec4 m = screenAt(px, uRot[2], 2, lift, flip);
+    vec4 k = screenAt(px, uRot[0], 0, lift, flip);
+    col *= mix(vec3(1.0), vec3(1.0, 0.92, 0.0), y.a);
+    col *= mix(vec3(1.0), vec3(0.0, 0.64, 0.9), c.a);
+    col *= mix(vec3(1.0), vec3(0.9, 0.05, 0.5), m.a);
+    col *= mix(vec3(1.0), uInk, k.a);
+  } else {
+    vec4 s = screenAt(px, uRot[0], 0, lift, flip);
+    vec3 ink = uPalette == 2 ? s.rgb : uInk;
+    col = mix(uPaper, ink, s.a);
+  }
+  oColor = vec4(col, 1.0);
+}
+`;
