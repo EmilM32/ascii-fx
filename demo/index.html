@@ -48,7 +48,7 @@
           <p class="eyebrow">zero dependencies · images, video, webcam</p>
           <h1>Light, pulled into letters.</h1>
           <p class="lede">
-            ascii-fx renders a picture as living type. Ordered dither, Floyd–Steinberg, halftone, and a cursor that the characters have to get out of the way of.
+            ascii-fx renders a picture as living type. Ordered dither, Floyd–Steinberg, a print-style halftone screen, and a cursor that the characters have to get out of the way of.
           </p>
           <div class="hero-actions">
             <a class="btn" href="#play">Open the playground</a>
@@ -93,6 +93,15 @@
           </div>
 
           <form id="controls" class="controls" autocomplete="off">
+            <fieldset>
+              <legend>Mode</legend>
+              <div class="seg" id="mode">
+                <button type="button" data-value="ascii" aria-pressed="true">ASCII</button>
+                <button type="button" data-value="halftone">Halftone</button>
+              </div>
+            </fieldset>
+
+            <div id="ascii-controls" class="group">
             <label class="field">
               <span>Charset</span>
               <select id="charset" name="charset">
@@ -110,12 +119,48 @@
               <span>Custom ramp</span>
               <input id="custom" name="custom" type="text" value=" .:-=+*#%@" spellcheck="false" />
             </label>
+            </div>
 
             <label class="field">
               <span>Cell size <output id="cell-out">9</output></span>
               <input id="cell" name="cellSize" type="range" min="4" max="28" step="1" value="9" />
             </label>
 
+            <div id="halftone-controls" class="group" hidden>
+              <label class="field">
+                <span>Angle <output id="angle-out">45°</output></span>
+                <input id="angle" name="angle" type="range" min="0" max="90" step="1" value="45" />
+              </label>
+              <fieldset>
+                <legend>Shape</legend>
+                <div class="seg" id="shape">
+                  <button type="button" data-value="dot" aria-pressed="true">Dot</button>
+                  <button type="button" data-value="square">Square</button>
+                  <button type="button" data-value="line">Line</button>
+                  <button type="button" data-value="diamond">Diamond</button>
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend>Palette</legend>
+                <div class="seg" id="palette">
+                  <button type="button" data-value="mono" aria-pressed="true">Mono</button>
+                  <button type="button" data-value="cmyk">CMYK</button>
+                  <button type="button" data-value="source">Source</button>
+                </div>
+              </fieldset>
+              <div class="split">
+                <label class="field">
+                  <span>Ink</span>
+                  <input id="ink" name="ink" type="color" value="#1c1a17" />
+                </label>
+                <label class="field">
+                  <span>Paper</span>
+                  <input id="paper" name="paper" type="color" value="#f3ecdb" />
+                </label>
+              </div>
+            </div>
+
+            <div id="glyph-controls" class="group">
             <fieldset>
               <legend>Color</legend>
               <div class="seg" id="color">
@@ -148,6 +193,7 @@
             <p id="floyd-note" class="note" hidden>
               Floyd–Steinberg runs on still images. Video and the camera use Bayer so the error doesn’t crawl between frames.
             </p>
+            </div>
 
             <label class="field">
               <span>Contrast <output id="contrast-out">1.35</output></span>

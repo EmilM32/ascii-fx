@@ -1,14 +1,32 @@
 import { pickNumber } from './math';
-import { ASCII_FX_DEFAULTS, type AsciiFxOptions, type ColorMode, type DitherMode, type FitMode, type InteractionMode, type ReducedMotion, type ResolvedAsciiFxOptions } from './types';
+import {
+  ASCII_FX_DEFAULTS,
+  type AsciiFxOptions,
+  type ColorMode,
+  type DitherMode,
+  type FitMode,
+  type HalftonePalette,
+  type HalftoneShape,
+  type InteractionMode,
+  type ReducedMotion,
+  type RenderMode,
+  type ResolvedAsciiFxOptions,
+} from './types';
 
 export const ATTRIBUTE_NAMES = [
   'src',
+  'mode',
   'charset',
   'cell-size',
   'color',
   'foreground',
   'background',
   'dither',
+  'angle',
+  'shape',
+  'palette',
+  'ink',
+  'paper',
   'contrast',
   'brightness',
   'invert',
@@ -24,12 +42,18 @@ export const ATTRIBUTE_NAMES = [
 
 /** Option each attribute sets. `src` and `webcam` are handled by the element itself. */
 const ATTRIBUTE_OPTIONS = {
+  mode: 'mode',
   charset: 'charset',
   'cell-size': 'cellSize',
   color: 'color',
   foreground: 'foreground',
   background: 'background',
   dither: 'dither',
+  angle: 'angle',
+  shape: 'shape',
+  palette: 'palette',
+  ink: 'ink',
+  paper: 'paper',
   contrast: 'contrast',
   brightness: 'brightness',
   invert: 'invert',
@@ -69,6 +93,33 @@ export function parseDitherMode(value: string | null | undefined): DitherMode | 
   return undefined;
 }
 
+export function parseRenderMode(value: string | null | undefined): RenderMode | undefined {
+  if (!value) return undefined;
+  const v = value.trim().toLowerCase();
+  if (v === 'ascii' || v === 'glyphs' || v === 'text') return 'ascii';
+  if (v === 'halftone' || v === 'dots') return 'halftone';
+  return undefined;
+}
+
+export function parseShape(value: string | null | undefined): HalftoneShape | undefined {
+  if (!value) return undefined;
+  const v = value.trim().toLowerCase();
+  if (v === 'dot' || v === 'circle' || v === 'round') return 'dot';
+  if (v === 'square') return 'square';
+  if (v === 'line' || v === 'lines') return 'line';
+  if (v === 'diamond' || v === 'rhombus') return 'diamond';
+  return undefined;
+}
+
+export function parsePalette(value: string | null | undefined): HalftonePalette | undefined {
+  if (!value) return undefined;
+  const v = value.trim().toLowerCase();
+  if (v === 'mono') return 'mono';
+  if (v === 'cmyk') return 'cmyk';
+  if (v === 'source' || v === 'color' || v === 'original') return 'source';
+  return undefined;
+}
+
 export function parseInteraction(value: string | null | undefined): InteractionMode | undefined {
   if (!value) return undefined;
   const v = value.trim().toLowerCase();
@@ -91,6 +142,7 @@ export function parseBool(value: string | null): boolean {
 }
 
 export function sanitizeOptions(input: Partial<AsciiFxOptions>, base: ResolvedAsciiFxOptions = ASCII_FX_DEFAULTS): ResolvedAsciiFxOptions {
+  const mode = parseRenderMode(input.mode) ?? base.mode;
   const color = parseColorMode(input.color) ?? base.color;
   const dither = parseDitherMode(input.dither) ?? base.dither;
   const interaction = parseInteraction(input.interaction) ?? base.interaction;
@@ -103,6 +155,7 @@ export function sanitizeOptions(input: Partial<AsciiFxOptions>, base: ResolvedAs
   const charset = input.charset === undefined || !input.charset.trim() ? base.charset : input.charset;
   return {
     source: input.source === undefined ? base.source : input.source,
+    mode,
     charset,
     cellSize: pickNumber(input.cellSize, base.cellSize, 2, 64),
     fontFamily: input.fontFamily?.trim() || base.fontFamily,
@@ -110,6 +163,11 @@ export function sanitizeOptions(input: Partial<AsciiFxOptions>, base: ResolvedAs
     foreground: input.foreground?.trim() || base.foreground,
     background: input.background?.trim() || base.background,
     dither,
+    angle: pickNumber(input.angle, base.angle, -360, 360),
+    shape: parseShape(input.shape) ?? base.shape,
+    palette: parsePalette(input.palette) ?? base.palette,
+    ink: input.ink?.trim() || base.ink,
+    paper: input.paper?.trim() || base.paper,
     contrast: pickNumber(input.contrast, base.contrast, 0, 3),
     brightness: pickNumber(input.brightness, base.brightness, -1, 1),
     invert: input.invert ?? base.invert,
@@ -129,6 +187,8 @@ export function attributesToOptions(get: (name: string) => string | null): Parti
   const out: Partial<AsciiFxOptions> = {};
   const src = get('src');
   if (src) out.source = src;
+  const mode = parseRenderMode(get('mode'));
+  if (mode) out.mode = mode;
   const charset = get('charset');
   if (charset) out.charset = charset;
   const cell = get('cell-size');
@@ -141,6 +201,16 @@ export function attributesToOptions(get: (name: string) => string | null): Parti
   if (background) out.background = background;
   const dither = parseDitherMode(get('dither'));
   if (dither) out.dither = dither;
+  const angle = get('angle');
+  if (angle != null && angle !== '') out.angle = Number(angle);
+  const shape = parseShape(get('shape'));
+  if (shape) out.shape = shape;
+  const palette = parsePalette(get('palette'));
+  if (palette) out.palette = palette;
+  const ink = get('ink');
+  if (ink) out.ink = ink;
+  const paper = get('paper');
+  if (paper) out.paper = paper;
   const contrast = get('contrast');
   if (contrast != null && contrast !== '') out.contrast = Number(contrast);
   const brightness = get('brightness');

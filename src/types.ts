@@ -11,6 +11,15 @@ export type ColorMode = 'mono' | 'color' | 'duotone';
 
 export type DitherMode = 'none' | 'bayer' | 'floyd-steinberg' | 'halftone';
 
+/** `ascii` draws glyphs (with optional dither). `halftone` draws a rotated screen of dots. */
+export type RenderMode = 'ascii' | 'halftone';
+
+/** Dot shape in `halftone` mode. `line` is an engraving-style line screen. */
+export type HalftoneShape = 'dot' | 'square' | 'line' | 'diamond';
+
+/** Ink in `halftone` mode: one ink, four process screens, or the source color per dot. */
+export type HalftonePalette = 'mono' | 'cmyk' | 'source';
+
 export type InteractionMode = 'none' | 'repel' | 'brighten' | 'swap';
 
 export type FitMode = 'cover' | 'contain';
@@ -27,9 +36,11 @@ export type AsciiFxSource =
 export interface AsciiFxOptions {
   /** Image, video, canvas, camera stream, or URL (`.mp4` / `.webm` / `.ogg` load as video). */
   source?: AsciiFxSource;
+  /** `ascii` (default) or `halftone`. */
+  mode?: RenderMode;
   /** Preset name or a custom ramp, darkest character first. `braille` uses 2×4 dot patterns. */
   charset?: CharsetPreset | string;
-  /** Cell height in CSS pixels. Width follows the font's aspect. */
+  /** Cell height in CSS pixels. Width follows the font's aspect. In `halftone` mode, the screen pitch (square cells). */
   cellSize?: number;
   fontFamily?: string;
   /** `mono` is flat ink, `color` keeps the source color, `duotone` blends background into foreground. */
@@ -37,6 +48,14 @@ export interface AsciiFxOptions {
   foreground?: string;
   background?: string;
   dither?: DitherMode;
+  /** Halftone screen angle in degrees. CMYK offsets the other inks from it. */
+  angle?: number;
+  shape?: HalftoneShape;
+  palette?: HalftonePalette;
+  /** Halftone ink (`mono`; the black screen in `cmyk`). Any CSS color. */
+  ink?: string;
+  /** Halftone paper. Any CSS color. */
+  paper?: string;
   /** 1 is unchanged. */
   contrast?: number;
   /** Added after contrast. 0 is unchanged. */
@@ -59,6 +78,7 @@ export interface AsciiFxOptions {
 
 export interface ResolvedAsciiFxOptions {
   source?: AsciiFxSource;
+  mode: RenderMode;
   charset: string;
   cellSize: number;
   fontFamily: string;
@@ -66,6 +86,11 @@ export interface ResolvedAsciiFxOptions {
   foreground: string;
   background: string;
   dither: DitherMode;
+  angle: number;
+  shape: HalftoneShape;
+  palette: HalftonePalette;
+  ink: string;
+  paper: string;
   contrast: number;
   brightness: number;
   invert: boolean;
@@ -81,6 +106,7 @@ export interface ResolvedAsciiFxOptions {
 }
 
 export const ASCII_FX_DEFAULTS: ResolvedAsciiFxOptions = {
+  mode: 'ascii',
   charset: 'classic',
   cellSize: 8,
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
@@ -88,6 +114,11 @@ export const ASCII_FX_DEFAULTS: ResolvedAsciiFxOptions = {
   foreground: '#f4f1ea',
   background: '#090909',
   dither: 'none',
+  angle: 45,
+  shape: 'dot',
+  palette: 'mono',
+  ink: '#1c1a17',
+  paper: '#f3ecdb',
   contrast: 1,
   brightness: 0,
   invert: false,
@@ -105,6 +136,7 @@ export interface AsciiFxSnapshot {
   cols: number;
   rows: number;
   renderer: 'webgl2' | 'canvas2d';
+  mode: RenderMode;
   /** Rolling frames per second while the loop is drawing. */
   fps: number;
   active: boolean;
@@ -122,7 +154,7 @@ export interface AsciiFx {
   invalidate(): void;
   destroy(): void;
   toPNG(): Promise<Blob>;
-  /** Glyph reading of the current frame. Halftone exports the underlying ramp. */
+  /** Glyph reading of the current frame. Halftone (mode or dither) exports the underlying ramp. */
   toText(): string;
   getSnapshot(): AsciiFxSnapshot;
 }
